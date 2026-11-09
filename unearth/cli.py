@@ -135,6 +135,11 @@ def cmd_scan(args) -> int:
                 scan_id = int(row["id"])
                 start = max(start, int(row["cursor"] or 0))
                 print("断点续扫：从 %s 继续" % human_bytes(start))
+                fixed = cat.reconcile_carved(args.out)
+                if fixed["removed_orphan_files"] or fixed["removed_orphan_rows"]:
+                    print("崩溃对账：清理盘上孤儿文件 %d 个、库中孤儿行 %d 行"
+                          % (fixed["removed_orphan_files"],
+                             fixed["removed_orphan_rows"]))
         if scan_id is None:
             scan_id = cat.begin_scan(source_id, args.target, args.profile, start, end, chunk)
 
@@ -175,7 +180,11 @@ def cmd_scan(args) -> int:
             return 130
         progress.close()
         elapsed = max(time.time() - t0, 1e-6)
-        cat.finish_scan(scan_id, "done")
+        if stats.get("stopped_early"):
+            cat.finish_scan(scan_id, "stopped_early",
+                            "limit_files=%d" % args.limit_files)
+        else:
+            cat.finish_scan(scan_id, "done")
         print("")
         print("扫描完成  %s  读取 %s  平均 %s"
               % (util.human_duration(elapsed), human_bytes(stats["bytes"]),
@@ -188,6 +197,16 @@ def cmd_scan(args) -> int:
                   % stats["partial"])
         if stats["skipped_live"]:
             print("跳过 %d 个仍然存在的文件（--exclude-live）" % stats["skipped_live"])
+        skipped = stats.get("skipped_too_big", 0) + stats.get("skipped_too_small", 0) \
+            + stats.get("skipped_off_end", 0)
+        if skipped:
+            print("另有 %d 个命中未入库：超大小上限 %d / 低于下限 %d / 伸出盘尾 %d"
+                  % (skipped, stats.get("skipped_too_big", 0),
+                     stats.get("skipped_too_small", 0),
+                     stats.get("skipped_off_end", 0)))
+        if stats.get("stopped_early"):
+            print("命中数到达 --limit-files %d，提前停止（scan 表已标记 stopped_early）"
+                  % args.limit_files)
         if stats["errors"]:
             print("解析失败 %d 次（已忽略）" % stats["errors"])
         print("")
@@ -251,7 +270,9 @@ def cmd_ntfs(args) -> int:
             if len(found) % 200 == 0:
                 print("  ... 已恢复 %d 个" % len(found))
         cat.commit()
-        cat.finish_scan(scan_id, "done")
+        status = "done" if not limit else "stopped_early"
+        cat.finish_scan(scan_id, status,
+                        "limit=%d" % limit if limit else "")
 
         elapsed = max(time.time() - t0, 1e-6)
         print("")

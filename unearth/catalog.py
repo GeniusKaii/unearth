@@ -159,10 +159,20 @@ class Catalog:
         self.conn.commit()
         return int(cur.lastrowid)
 
-    def checkpoint(self, scan_id: int, cursor: int, files: int) -> None:
+    def checkpoint(self, scan_id: int, cursor: int, files: int,
+                   bytes_read: int = 0) -> None:
+        """Persist resume state.
+
+        ``bytes`` is the number of bytes actually read from the source (the
+        scan bar), which is *not* the same as the cursor: earlier chunks have
+        been read too, and on resume the range before the cursor is skipped.
+        """
+        if bytes_read <= 0:
+            # legacy callers passed cursor as a proxy for bytes
+            bytes_read = cursor
         self.conn.execute(
             "UPDATE scan SET cursor=?, bytes=?, files=? WHERE id=?",
-            (cursor, cursor, files, scan_id),
+            (cursor, bytes_read, files, scan_id),
         )
         self.conn.commit()
 
@@ -211,6 +221,39 @@ class Catalog:
     def count_files(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) FROM file").fetchone()
         return int(row[0]) if row else 0
+
+    def reconcile_carved(self, out_dir: str) -> dict:
+        """Sync carved files on disk with catalogue rows.
+
+        A crash between "file written" and "row committed" leaves orphans on
+        disk that a resumed scan would carve again under the same name and
+        then count twice.  Orphan rows (row without file) are deleted the
+        other way round.  Returns counts.
+        """
+        import glob
+        rows = {r["path"]: r["id"] for r in
+                self.conn.execute("SELECT id, path FROM file WHERE path LIKE 'carved/%'")}
+        on_disk = {}
+        carved_root = os.path.join(out_dir, "carved")
+        for path in glob.glob(os.path.join(carved_root, "*", "*")):
+            rel = util.rel_posix(path, out_dir)
+            on_disk[rel] = path
+        orphan_files = []
+        for rel, path in on_disk.items():
+            if rel not in rows:
+                orphan_files.append(path)
+        orphan_rows = [fid for rel, fid in rows.items() if rel not in on_disk]
+        for path in orphan_files:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        if orphan_rows:
+            self.conn.executemany("DELETE FROM file WHERE id=?",
+                                  [(fid,) for fid in orphan_rows])
+        self.commit()
+        return {"removed_orphan_files": len(orphan_files),
+                "removed_orphan_rows": len(orphan_rows)}
 
     # -- statistics ----------------------------------------------------------
     def stats(self) -> dict:

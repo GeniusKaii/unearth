@@ -105,6 +105,68 @@ class TestPipeline(unittest.TestCase):
             self.assertIsNotNone(row["off"])
             self.assertGreater(row["size"], 0)
 
+    def test_stop_after_marks_early_stop(self):
+        import io
+        from unearth import selftest
+        from contextlib import redirect_stdout
+        workdir = support.make_workdir("limit-")
+        try:
+            with redirect_stdout(io.StringIO()):
+                res = selftest.run(size=8 * MIB, keep=True, workdir=workdir)
+            self.assertTrue(res["ok"])
+        finally:
+            support.clean(workdir)
+
+    def test_reconcile_carved_removes_orphans(self):
+        """A crash between file-write and row-commit leaves an orphan; resume cleans it."""
+        # simulate: one carved file on disk with no catalogue row
+        row = self.cat.conn.execute(
+            "SELECT path FROM file WHERE path LIKE 'carved/%' LIMIT 1").fetchone()
+        self.assertIsNotNone(row)
+        orphan = os.path.join(self.out, "carved", "photo", "orphan_test.jpg")
+        with open(orphan, "wb") as fh:
+            fh.write(b"junk")
+        # and one catalogue row whose file is missing
+        victim = self.cat.conn.execute(
+            "SELECT id, path FROM file WHERE path LIKE 'carved/%' LIMIT 1").fetchone()
+        os.remove(os.path.join(self.out, victim["path"]))
+
+        fixed = self.cat.reconcile_carved(self.out)
+        self.assertGreaterEqual(fixed["removed_orphan_files"], 1)
+        self.assertGreaterEqual(fixed["removed_orphan_rows"], 1)
+        self.assertFalse(os.path.exists(orphan))
+        gone = self.cat.conn.execute(
+            "SELECT COUNT(*) FROM file WHERE id=?", (victim["id"],)).fetchone()[0]
+        self.assertEqual(gone, 0)
+
+    def test_limit_files_records_stopped_early(self):
+        from unearth.scanner import ScanOptions, scan_source
+        from unearth.device import FileSource
+        workdir = support.make_workdir("limitcmd-")
+        try:
+            image = os.path.join(workdir, "demo.img")
+            with open(image, "wb") as fh:
+                fh.write(fixtures.build_demo_image(8 * MIB))
+            out = os.path.join(workdir, "dig")
+            cat = Catalog(os.path.join(out, "catalog.db"))
+            src = FileSource(image)
+            sid = cat.begin_scan(1, "img:" + image, "all", 0, src.size, 4 * MIB)
+            stats = scan_source(src, cat, sid, ScanOptions(
+                profile="all", chunk=4 * MIB, out_dir=out, stop_after=3))
+            self.assertEqual(stats["files"], 3)
+            self.assertTrue(stats["stopped_early"])
+            # 8 MiB image in 4 MiB chunks: the first chunk's 3 hits reach the
+            # limit, so only 4 MiB have been read when the scan stops.
+            self.assertEqual(stats["bytes"], 4 * MIB)
+            row = cat.conn.execute("SELECT status FROM scan WHERE id=?", (sid,)).fetchone()
+            cat.finish_scan(sid, "stopped_early" if stats.get("stopped_early") else "done")
+            status_now = cat.conn.execute("SELECT status FROM scan WHERE id=?", (sid,)).fetchone()
+            self.assertEqual(status_now["status"], "stopped_early")
+            cat.close()
+            src.close()
+        finally:
+            support.clean(workdir)
+
 
 if __name__ == "__main__":
     unittest.main()

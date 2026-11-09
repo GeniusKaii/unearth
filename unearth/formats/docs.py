@@ -21,30 +21,94 @@ OLE_MAGIC = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 # --------------------------------------------------------------------------- #
 # PDF
 # --------------------------------------------------------------------------- #
+def _pdf_eol_len(reader, end: int) -> int:
+    """Bytes of EOL right after an %%EOF marker (0, 1 or 2)."""
+    tail = reader.read(end, 2)
+    if tail[:2] == b"\r\n":
+        return 2
+    if tail[:1] in (b"\n", b"\r"):
+        return 1
+    return 0
+
+
+def _pdf_trailer_valid(reader, off: int, eof_end: int) -> bool:
+    """True when this %%EOF belongs to a real trailer.
+
+    A PDF trailer is ``startxref\\n<offset>\\n%%EOF`` where the offset points
+    at an xref table (or xref stream object) *inside* the file.  Checking that
+    is what lets us pick the LAST %%EOF of an incrementally saved document
+    without running past the file into whatever sits next on disk.
+    """
+    window = reader.read(max(off, eof_end - 133), 133)
+    if not window:
+        return False
+    k = window.rfind(b"startxref")
+    if k < 0:
+        return False
+    rest = window[k + 9:]
+    j = 0
+    while j < len(rest) and rest[j:j + 1] in (b" ", b"\r", b"\n", b"\t"):
+        j += 1
+    d = j
+    while d < len(rest) and 0x30 <= rest[d] <= 0x39:
+        d += 1
+    digits = rest[j:d]
+    if not digits:
+        return False
+    target = off + int(digits)
+    if not (off < target < eof_end):
+        return False
+    peek = reader.read(target, 16)
+    if not peek:
+        return False
+    return peek.startswith(b"xref") or b" obj" in peek
+
+
 def carve_pdf(reader, off: int):
+    """Measure a PDF up to its LAST trailer.
+
+    Incrementally saved PDFs (every "save" in a viewer appends a new xref +
+    trailer) contain several ``%%EOF`` markers; stopping at the first one
+    truncates the document at an old revision.  So we keep scanning and take
+    the last %%EOF that has a valid ``startxref`` in front of it.  Scanning
+    stops at the next ``%PDF-`` header so an adjacent document is never
+    swallowed (tradeoff: a literal ``%PDF-`` inside an *uncompressed* stream
+    of this file would end the measurement early - rare in practice).
+    """
     if not reader.read(off, 5) == b"%PDF-":
         return None
     pos = off + 5
     cap = min(reader.limit, off + 512 * MIB)
+    best_end = -1         # end of the last %%EOF with a valid trailer
+    fallback_end = -1     # end of the last %%EOF before the next document
     while pos < cap:
         chunk = reader.read(pos, MIB)
         if not chunk:
-            return None
-        i = chunk.find(b"%%EOF")
-        if i >= 0:
-            size = pos + i + 5 - off
-            tail = reader.read(pos + i + 5, 2)
-            if tail[:2] == b"\r\n":
-                size += 2
-            elif tail[:1] in (b"\n", b"\r"):
-                size += 1
-            if size < 128:
-                return None
-            return CarveResult(size=size, complete=True, meta={"kind": "doc"})
+            break
+        limit = len(chunk)
+        j = chunk.find(b"%PDF-")           # a new document starts here
+        if j >= 0:
+            limit = min(limit, j)
+        i = chunk.find(b"%%EOF", 0, limit)
+        while i >= 0:
+            end = pos + i + 5
+            if end > fallback_end:
+                fallback_end = end
+            if end > best_end and _pdf_trailer_valid(reader, off, end):
+                best_end = end
+            i = chunk.find(b"%%EOF", i + 1, limit)
+        if j >= 0:
+            break
         if len(chunk) < MIB:
-            return None
+            break
         pos += MIB - 8
-    return None
+    end = best_end if best_end > 0 else fallback_end
+    if end < 0:
+        return None
+    size = end - off + _pdf_eol_len(reader, end)
+    if size < 128:
+        return None
+    return CarveResult(size=size, complete=True, meta={"kind": "doc"})
 
 
 # --------------------------------------------------------------------------- #

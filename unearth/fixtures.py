@@ -209,6 +209,20 @@ def make_pdf(text: str = "unearth test") -> bytes:
     return bytes(out)
 
 
+def make_pdf_updated() -> bytes:
+    """A PDF after one incremental save: a second section + trailer + %%EOF.
+
+    Carvers that stop at the first %%EOF return the old revision; the current
+    revision is the whole byte string.
+    """
+    base = make_pdf()
+    section = b"2 0 obj\n<< /Type /X >>\nendobj\n"
+    xref_off = len(base) + 1 + len(section)   # +1: the separator newline
+    update = (section + b"xref\n0 0\ntrailer<<>>\nstartxref\n"
+              + str(xref_off).encode() + b"\n%%EOF\n")
+    return base + b"\n" + update
+
+
 def make_ole() -> bytes:
     """A 3 sector compound file whose directory says 'WordDocument'."""
     sector = 512

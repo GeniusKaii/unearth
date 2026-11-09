@@ -70,11 +70,17 @@ def scan_source(src, catalog, scan_id: int, opts: ScanOptions,
     overlap = max_magic_len() + 16
 
     stats = {"files": 0, "partial": 0, "bytes": 0, "errors": 0,
-             "skipped_live": 0, "by_fmt": {}, "by_kind": {}, "size": 0}
+             "skipped_live": 0, "by_fmt": {}, "by_kind": {}, "size": 0,
+             "skipped_too_big": 0, "skipped_too_small": 0,
+             "skipped_off_end": 0}
     claimed_end = start
     off = start
     last_ckpt = time.time()
     last_bytes = 0
+    # Bytes read before the current chunk (for accurate scan.bytes on
+    # resume): every checkpoint that survives an interruption knows exactly
+    # how much it read, and a resumed run adds to that.
+    committed = 0
 
     while off < end:
         n = min(opts.chunk, end - off)
@@ -112,12 +118,15 @@ def scan_source(src, catalog, scan_id: int, opts: ScanOptions,
             if res is None:
                 continue
             if res.size < max(sig.min_size, opts.min_size):
+                stats["skipped_too_small"] += 1
                 continue
-            if res.size > sig.max_size:
-                continue
-            if opts.max_size and res.size > opts.max_size:
+            if res.size > sig.max_size or (opts.max_size and res.size > opts.max_size):
+                # a real file we cannot measure safely, or bigger than the
+                # profile allows - counted, not silently dropped
+                stats["skipped_too_big"] += 1
                 continue
             if abs_off + res.size > src.size:
+                stats["skipped_off_end"] += 1
                 continue
             if live and live.contains(abs_off, res.size):
                 stats["skipped_live"] += 1
@@ -158,17 +167,20 @@ def scan_source(src, catalog, scan_id: int, opts: ScanOptions,
                     kind, ext, util.human_bytes(res.size), abs_off,
                     "ok" if complete else "PARTIAL"), flush=True)
             if opts.stop_after and stats["files"] >= opts.stop_after:
-                catalog.commit()
+                catalog.checkpoint(scan_id, off, stats["files"],
+                                   committed + stats["bytes"])
+                stats["stopped_early"] = True
                 return stats
 
         off += n
         now = time.time()
         if now - last_ckpt > 5 or (stats["bytes"] - last_bytes) > 256 * MIB:
-            catalog.checkpoint(scan_id, off, stats["files"])
+            catalog.checkpoint(scan_id, off, stats["files"],
+                               committed + stats["bytes"])
             last_ckpt = now
             last_bytes = stats["bytes"]
 
-    catalog.checkpoint(scan_id, end, stats["files"])
+    catalog.checkpoint(scan_id, end, stats["files"], committed + stats["bytes"])
     return stats
 
 

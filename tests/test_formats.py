@@ -140,6 +140,23 @@ class TestDocs(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertEqual(res.size, len(blob))
 
+    def test_pdf_incremental_save_uses_last_revision(self):
+        """A save-updated PDF has two %%EOF markers; we must measure to the last."""
+        blob = fixtures.make_pdf_updated()
+        res = carve(blob, "pdf")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.size, len(blob))
+        # sanity: the fixture really is an incremental save
+        self.assertEqual(blob.count(b"%%EOF"), 2)
+        self.assertGreater(res.size, blob.find(b"%%EOF") + 5)
+
+    def test_pdf_stops_before_next_document(self):
+        first = fixtures.make_pdf()
+        second = fixtures.make_pdf("another doc")
+        res = carve(first + second, "pdf")
+        self.assertIsNotNone(res)
+        self.assertEqual(res.size, len(first))
+
     def test_ole(self):
         blob = fixtures.make_ole()
         res = carve(blob, "ole")
