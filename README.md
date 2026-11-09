@@ -172,7 +172,8 @@ D:\dig\e\
 
 ```powershell
 python -m unittest discover -s tests -t . -v     # 44 个用例，全部基于合成镜像
-python -m unearth selftest                        # 端到端
+python -m unearth selftest                        # 端到端，16 项断言
+node tools/check_album.js D:\dig\e\album\index.html   # 无浏览器校验相册渲染（可选，需 Node）
 ```
 
 结构见 [docs/DESIGN.md](docs/DESIGN.md)，下一步（"挖掘丢失的工作文件"）见 [docs/ROADMAP.md](docs/ROADMAP.md)。
