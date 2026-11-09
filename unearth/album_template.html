@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root{
+  --bg:#14110e; --fg:#efe7dc; --mut:#9c9084; --card:#1d1915; --line:#2c2721;
+  --acc:#e0a458; --acc2:#8fb08a; --tile:170px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);
+  font:14px/1.5 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+a{color:var(--acc);text-decoration:none}
+header.top{padding:18px 22px 10px;border-bottom:1px solid var(--line);position:sticky;top:0;
+  background:rgba(20,17,14,.94);backdrop-filter:blur(8px);z-index:20}
+h1{margin:0 0 2px;font-size:19px;font-weight:600;letter-spacing:.5px}
+h1 small{color:var(--mut);font-weight:400;font-size:12px;margin-left:8px}
+.sub{color:var(--mut);font-size:12px}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+input[type=search],select,button{background:var(--card);color:var(--fg);border:1px solid var(--line);
+  border-radius:7px;padding:6px 9px;font-size:13px;outline:none}
+input[type=search]{min-width:210px}
+button{cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.on{background:var(--acc);color:#1a1510;border-color:var(--acc);font-weight:600}
+.chip{display:flex;gap:4px}
+.chip button{border-radius:20px;padding:5px 12px}
+.count{color:var(--mut);font-size:12px;margin-left:auto}
+main{padding:6px 14px 60px}
+.day{margin:20px 4px 8px;display:flex;align-items:baseline;gap:10px;
+  position:sticky;top:132px;background:var(--bg);padding:6px 4px;z-index:10}
+.day h2{margin:0;font-size:15px;font-weight:600;color:var(--acc)}
+.day .n{color:var(--mut);font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--tile),1fr));gap:7px}
+.t{position:relative;aspect-ratio:1;background:#0d0b09;border-radius:5px;overflow:hidden;
+  cursor:zoom-in;border:1px solid transparent}
+.t:hover{border-color:var(--acc)}
+.t img{width:100%;height:100%;object-fit:cover;display:block}
+.t .ph{width:100%;height:100%;display:flex;align-items:center;justify-content:center;
+  color:var(--mut);font-size:11px;flex-direction:column;gap:6px;text-align:center;padding:8px}
+.t .ph b{font-size:22px;color:var(--acc2)}
+.t .badge{position:absolute;left:5px;bottom:5px;background:rgba(0,0,0,.72);color:#eee;
+  font-size:10px;padding:2px 5px;border-radius:4px;max-width:calc(100% - 10px);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t .star{position:absolute;right:4px;top:4px;font-size:15px;color:#ffd479;
+  text-shadow:0 1px 3px #000;display:none}
+.t.fav .star{display:block}
+.t.partial{outline:2px dashed #8a6a3a;outline-offset:-3px}
+.empty{color:var(--mut);padding:60px;text-align:center}
+#more{display:block;margin:26px auto;padding:9px 22px}
+#lb{position:fixed;inset:0;background:rgba(8,7,6,.96);display:none;z-index:50;
+  grid-template-columns:1fr 320px}
+#lb.open{display:grid}
+#lb .stage{display:flex;align-items:center;justify-content:center;padding:18px;min-width:0}
+#lb img,#lb video{max-width:100%;max-height:calc(100vh - 40px);object-fit:contain;
+  box-shadow:0 10px 40px #000}
+#lb .side{border-left:1px solid var(--line);padding:18px;overflow:auto;font-size:12.5px}
+#lb .side h3{margin:0 0 10px;font-size:14px;word-break:break-all}
+#lb .side dl{display:grid;grid-template-columns:76px 1fr;gap:5px 8px;margin:0 0 16px}
+#lb .side dt{color:var(--mut)}
+#lb .side dd{margin:0;word-break:break-all}
+#lb .nav{display:flex;gap:8px;margin-top:14px}
+#lb .nav button{flex:1}
+.note{color:var(--mut);font-size:11.5px;line-height:1.6;margin-top:18px;
+  border-top:1px solid var(--line);padding-top:10px}
+footer{color:var(--mut);font-size:11.5px;padding:0 22px 40px}
+kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:11px}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>__TITLE__ <small id="stat"></small></h1>
+  <div class="sub" id="sub"></div>
+  <div class="bar">
+    <input type="search" id="q" placeholder="搜索文件名 / 文件夹 / 相机">
+    <span class="chip" id="kinds">
+      <button data-k="all" class="on">全部</button>
+      <button data-k="photo">照片</button>
+      <button data-k="video">视频</button>
+      <button data-k="doc">文档</button>
+    </span>
+    <select id="ym"><option value="">按年月</option></select>
+    <select id="minmp">
+      <option value="0">任意像素</option>
+      <option value="1">≥1 MP</option>
+      <option value="2">≥2 MP</option>
+      <option value="5">≥5 MP</option>
+      <option value="8">≥8 MP</option>
+    </select>
+    <select id="cam"><option value="">按相机</option></select>
+    <span class="chip">
+      <button id="t-gps">含 GPS</button>
+      <button id="t-full">仅完整</button>
+      <button id="t-nodup" class="on">隐藏重复</button>
+      <button id="t-fav">只看 ★</button>
+    </span>
+    <select id="sort">
+      <option value="time">按时间</option>
+      <option value="score">按推荐度</option>
+      <option value="size">按大小</option>
+      <option value="name">按文件名</option>
+    </select>
+    <button id="tile">缩略图</button>
+    <button id="exp">导出当前筛选清单</button>
+    <span class="count" id="n"></span>
+  </div>
+</header>
+
+<main>
+  <div id="list"></div>
+  <button id="more" style="display:none">加载更多</button>
+  <div class="empty" id="empty" style="display:none">没有符合条件的文件</div>
+</main>
+
+<footer>
+  键盘：<kbd>←</kbd><kbd>→</kbd> 切换，<kbd>Esc</kbd> 关闭，<kbd>F</kbd> 收藏。生成的静态相册，可离线打开。
+</footer>
+
+<div id="lb">
+  <div class="stage" id="stage"></div>
+  <div class="side">
+    <h3 id="lb-title"></h3>
+    <dl id="lb-meta"></dl>
+    <div class="nav">
+      <button id="prev">上一张</button>
+      <button id="next">下一张</button>
+    </div>
+    <div class="nav">
+      <button id="fav">收藏</button>
+      <button id="open">打开原文件</button>
+    </div>
+    <div class="note" id="lb-note"></div>
+  </div>
+</div>
+
+<script type="application/json" id="data">/*__DATA__*/</script>
+<script>
+(function(){
+  const DATA = JSON.parse(document.getElementById('data').textContent);
+  const ITEMS = DATA.items || [];
+  const LIMIT = 600;           // tiles rendered per batch
+  let shown = LIMIT;
+  const favKey = 'unearth.fav.v1';
+  let fav = new Set(JSON.parse(localStorage.getItem(favKey) || '[]'));
+
+  const $ = id => document.getElementById(id);
+  const state = {q:'', kind:'all', ym:'', minmp:0, cam:'', gps:false, full:false,
+                 hideDup:true, onlyFav:false, sort:'time', tile:170};
+  const visible = [];
+
+  function saveFav(){ localStorage.setItem(favKey, JSON.stringify([...fav])); }
+
+  function fmtBytes(n){
+    if(!n) return '-';
+    const u=['B','KB','MB','GB','TB']; let i=0; n=n;
+    while(n>=1024 && i<u.length-1){n/=1024;i++;}
+    return (i?n.toFixed(1):n)+' '+u[i];
+  }
+  function fmtDur(s){
+    if(!s) return '';
+    s=Math.round(s); const m=Math.floor(s/60), r=s%60;
+    return m+':'+String(r).padStart(2,'0');
+  }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  // ---- filter ----
+  function matches(it){
+    if(state.kind!=='all' && it.k!==state.kind) return false;
+    if(state.minmp && (it.w||0)*(it.h||0) < state.minmp*1e6) return false;
+    if(state.gps && (it.lat==null)) return false;
+    if(state.full && !it.c) return false;
+    if(state.hideDup && it.dup) return false;
+    if(state.onlyFav && !fav.has(it.id)) return false;
+    if(state.cam && (it.mk||'')!==state.cam) return false;
+    if(state.ym){
+      const d=it.d||'unknown';
+      if(state.ym==='unknown'){ if(d!=='unknown') return false; }
+      else if(!d.startsWith(state.ym)) return false;
+    }
+    if(state.q){
+      const hay=((it.n||'')+' '+(it.o||'')+' '+(it.mk||'')+' '+(it.md||'')).toLowerCase();
+      if(!hay.includes(state.q.toLowerCase())) return false;
+    }
+    return true;
+  }
+  function sortItems(list){
+    const s=state.sort;
+    list.sort((a,b)=>{
+      if(s==='size') return (b.sz||0)-(a.sz||0);
+      if(s==='name') return (a.n||'').localeCompare(b.n||'');
+      if(s==='score') return (b.sc||0)-(a.sc||0);
+      const ta=a.t||'', tb=b.t||'';
+      return tb.localeCompare(ta);
+    });
+  }
+
+  // ---- render ----
+  function render(){
+    const all = ITEMS.filter(matches);
+    visible.length=0; visible.push(...all);
+    sortItems(visible);
+    $('n').textContent = visible.length + ' 个 / 共 ' + ITEMS.length;
+    $('empty').style.display = visible.length ? 'none' : 'block';
+    $('more').style.display = visible.length > shown ? 'block' : 'none';
+
+    const byDay = new Map();
+    visible.slice(0, shown).forEach(it=>{
+      const d = it.d || 'unknown';
+      if(!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(it);
+    });
+    const days=[...byDay.keys()].sort();
+    if(state.sort==='time') days.reverse();
+
+    const parts=[];
+    for(const d of days){
+      const arr=byDay.get(d);
+      const label = d==='unknown' ? '日期未知' : d;
+      parts.push('<div class="day"><h2>'+esc(label)+'</h2><span class="n">'+arr.length+' 个</span></div>');
+      parts.push('<div class="grid">');
+      for(const it of arr) parts.push(tile(it));
+      parts.push('</div>');
+    }
+    $('list').innerHTML = parts.join('');
+    $('list').querySelectorAll('.t').forEach(el=>{
+      el.addEventListener('click', ()=> openLb(Number(el.dataset.id)));
+    });
+  }
+
+  function thumbOf(it){
+    if(it.th) return it.th;
+    if(it.k==='photo' && ['jpg','jpeg','png','gif','webp','bmp'].includes(it.f)) return it.p;
+    return '';
+  }
+  function tile(it){
+    const src = thumbOf(it);
+    const badge = (it.k==='video' ? '▶ ' + fmtDur(it.dur) :
+                   it.k==='doc' ? (it.f||'doc').toUpperCase() :
+                   (it.w ? it.w+'×'+it.h : ''));
+    let inner;
+    if(src){
+      inner = '<img loading="lazy" src="'+esc(src)+'" alt="">';
+    }else{
+      const icon = it.k==='video' ? '🎞' : it.k==='doc' ? '📄' : '🖼';
+      inner = '<div class="ph"><b>'+icon+'</b>'+esc(it.f||'')+'</div>';
+    }
+    const cls = 't' + (fav.has(it.id)?' fav':'') + (it.c?'':' partial');
+    return '<div class="'+cls+'" data-id="'+it.id+'" title="'+esc(it.n||'')+'">'+inner+
+      '<span class="star">★</span><span class="badge">'+esc(badge)+'</span></div>';
+  }
+
+  // ---- lightbox ----
+  let cur = -1;
+  function openLb(id){
+    const i = visible.findIndex(x=>x.id===id);
+    if(i<0) return;
+    cur=i; showLb();
+    $('lb').classList.add('open');
+  }
+  function showLb(){
+    const it = visible[cur]; if(!it) return;
+    const st=$('stage');
+    if(it.k==='video'){
+      st.innerHTML='<video controls autoplay src="'+esc(it.p)+'"></video>';
+    }else if(it.k==='photo' && ['jpg','jpeg','png','gif','webp','avif','bmp','tif','tiff'].includes(it.f)){
+      st.innerHTML='<img src="'+esc(it.p)+'" alt="">';
+    }else{
+      st.innerHTML='<div class="ph" style="font-size:14px">无法在浏览器内预览，请用“打开原文件”</div>';
+    }
+    $('lb-title').textContent = it.n || ('#'+it.id);
+    const rows=[
+      ['类型', it.k + (it.f? ' / '+it.f : '') + (it.c?'':'（不完整）')],
+      ['时间', it.t ? it.t.replace('T',' ').slice(0,19) : '未知'],
+      ['尺寸', (it.w&&it.h)? it.w+' × '+it.h + ' ('+((it.w*it.h)/1e6).toFixed(1)+' MP)' : '-'],
+      ['大小', fmtBytes(it.sz)],
+      ['相机', [it.mk,it.md].filter(Boolean).join(' ') || '-'],
+      ['GPS', it.lat!=null ? it.lat.toFixed(5)+', '+it.lon.toFixed(5) : '-'],
+      ['推荐度', (it.sc||0)+' / 100'],
+      ['原文件夹', it.o || '-'],
+      ['磁盘偏移', it.off!=null ? '0x'+it.off.toString(16) : '-'],
+      ['来源', it.src || '-']
+    ];
+    $('lb-meta').innerHTML = rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+esc(r[1])+'</dd>').join('');
+    $('lb-note').textContent = it.note || '';
+    $('fav').textContent = fav.has(it.id)? '★ 已收藏' : '☆ 收藏';
+    $('open').onclick = ()=>{ window.open(it.p,'_blank'); };
+  }
+  function step(d){
+    if(!visible.length) return;
+    cur = (cur + d + visible.length) % visible.length;
+    showLb();
+  }
+  function closeLb(){
+    $('lb').classList.remove('open');
+    $('stage').innerHTML='';
+  }
+  function toggleFav(){
+    const it=visible[cur]; if(!it) return;
+    if(fav.has(it.id)) fav.delete(it.id); else fav.add(it.id);
+    saveFav(); showLb(); render();
+  }
+
+  // ---- controls ----
+  $('q').addEventListener('input', e=>{state.q=e.target.value; shown=LIMIT; render();});
+  document.querySelectorAll('#kinds button').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      state.kind=b.dataset.k;
+      document.querySelectorAll('#kinds button').forEach(x=>x.classList.toggle('on', x===b));
+      shown=LIMIT; render();
+    });
+  });
+  $('ym').addEventListener('change', e=>{state.ym=e.target.value; shown=LIMIT; render();});
+  $('minmp').addEventListener('change', e=>{state.minmp=Number(e.target.value); shown=LIMIT; render();});
+  $('cam').addEventListener('change', e=>{state.cam=e.target.value; shown=LIMIT; render();});
+  $('sort').addEventListener('change', e=>{state.sort=e.target.value; render();});
+  $('t-gps').addEventListener('click', e=>{state.gps=!state.gps; e.target.classList.toggle('on'); shown=LIMIT; render();});
+  $('t-full').addEventListener('click', e=>{state.full=!state.full; e.target.classList.toggle('on'); shown=LIMIT; render();});
+  $('t-nodup').addEventListener('click', e=>{state.hideDup=!state.hideDup; e.target.classList.toggle('on'); shown=LIMIT; render();});
+  $('t-fav').addEventListener('click', e=>{state.onlyFav=!state.onlyFav; e.target.classList.toggle('on'); shown=LIMIT; render();});
+  $('tile').addEventListener('click', ()=>{
+    state.tile = state.tile===170 ? 110 : (state.tile===110 ? 250 : 170);
+    document.documentElement.style.setProperty('--tile', state.tile+'px');
+  });
+  $('more').addEventListener('click', ()=>{shown += LIMIT*2; render();});
+  $('prev').addEventListener('click', ()=>step(-1));
+  $('next').addEventListener('click', ()=>step(1));
+  $('fav').addEventListener('click', toggleFav);
+  $('lb').addEventListener('click', e=>{ if(e.target.id==='lb') closeLb(); });
+  document.addEventListener('keydown', e=>{
+    if(!$('lb').classList.contains('open')) return;
+    if(e.key==='ArrowLeft') step(-1);
+    else if(e.key==='ArrowRight') step(1);
+    else if(e.key==='Escape') closeLb();
+    else if(e.key==='f'||e.key==='F') toggleFav();
+  });
+  $('exp').addEventListener('click', ()=>{
+    const ids = visible.map(x=>x.id);
+    const blob = new Blob([JSON.stringify({generated:new Date().toISOString(),
+      source:DATA.source, count:ids.length, ids:ids}, null, 1)], {type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='picked.json';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  });
+
+  // ---- init selects + header ----
+  const years=new Set();
+  const cams=new Set();
+  for(const it of ITEMS){
+    if(it.d && it.d!=='unknown') years.add(it.d.slice(0,7));
+    if(it.mk) cams.add(it.mk);
+  }
+  const ym=$('ym');
+  [...years].sort().reverse().forEach(y=>{
+    const o=document.createElement('option'); o.value=y; o.textContent=y; ym.appendChild(o);
+  });
+  const unk=document.createElement('option'); unk.value='unknown'; unk.textContent='日期未知'; ym.appendChild(unk);
+  const cam=$('cam');
+  [...cams].sort().forEach(c=>{
+    const o=document.createElement('option'); o.value=c; o.textContent=c; cam.appendChild(o);
+  });
+
+  const st=DATA.stats||{};
+  $('sub').textContent = (DATA.source? '来源 '+DATA.source+' · ':'') +
+    '生成于 '+(DATA.generated||'')+' · '+fmtBytes(st.bytes||0)+
+    ' · 有拍摄时间 '+(st.with_time||0)+' · 含 GPS '+(st.with_gps||0)+
+    ' · 重复 '+(st.dups||0);
+  $('stat').textContent = (st.files||ITEMS.length)+' 个文件';
+  document.documentElement.style.setProperty('--tile', state.tile+'px');
+  render();
+})();
+</script>
+</body>
+</html>

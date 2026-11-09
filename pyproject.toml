@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "unearth"
+version = "0.1.0"
+description = "Recover deleted or forgotten photos, videos and documents from old disks, then triage them into a browsable timeline album."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Kaii" }]
+keywords = ["data-recovery", "forensics", "carving", "ntfs", "photos", "video"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Recovery Tools",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Optional: better thumbnails / perceptual hashing for files without an embedded
+# preview. Everything works without it, just with fewer thumbnails.
+thumbs = ["pillow>=9.0"]
+dev = ["pillow>=9.0"]
+
+[project.scripts]
+unearth = "unearth.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["unearth*"]
+
+[tool.setuptools.package-data]
+unearth = ["album_template.html", "data/*.jpg", "data/*.mp4"]

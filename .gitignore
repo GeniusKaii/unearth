@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# recovery output never belongs in the repo
+out/
+*.db
+*.db-wal
+*.db-shm
+*.img
+*.dd
+*.raw
+*.vhd
+*.vhdx
+
+# local scratch
+tmp/
+.pytest_cache/
+.testtmp/
+demo/
