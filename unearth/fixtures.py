@@ -428,8 +428,14 @@ def make_ntfs_image(cluster_size=4096, sector_size=512) -> bytes:
 # --------------------------------------------------------------------------- #
 # a whole fake disk for the end to end demo
 # --------------------------------------------------------------------------- #
-def build_demo_image(total_size: int = 24 * MIB, seed: int = 7) -> bytes:
-    """Random "unallocated" space with a believable scatter of files inside."""
+def build_demo_image(total_size: int = 24 * MIB, seed: int = 7,
+                     varied: bool = True) -> bytes:
+    """Random "unallocated" space with a believable scatter of files inside.
+
+    With ``varied`` the photos carry different capture dates, cameras and GPS
+    coordinates, so the generated album looks like a real (small) timeline
+    instead of one day of one hundred identical files.
+    """
     rng = random.Random(seed)
     photo = jpeg_with_exif()
     video = sample("sample.mp4")
@@ -438,7 +444,30 @@ def build_demo_image(total_size: int = 24 * MIB, seed: int = 7) -> bytes:
     pdf = make_pdf()
     ole = make_ole()
 
-    fills = [photo, plain, video, doc, pdf, ole, photo]
+    variants = [photo, plain]
+    if varied:
+        cameras = [
+            ("Canon", "Canon EOS 5D Mark III"),
+            ("Apple", "iPhone 6"),
+            ("NIKON CORPORATION", "NIKON D7000"),
+            ("Xiaomi", "MI 8"),
+            ("SONY", "ILCE-7M2"),
+        ]
+        for i in range(14):
+            year = 2009 + (i * 3) % 10
+            month = 1 + (i * 5) % 12
+            day = 1 + (i * 7) % 27
+            hour = (i * 3) % 24
+            make, model = cameras[i % len(cameras)]
+            exif = build_exif(
+                make=make, model=model,
+                when="%04d:%02d:%02d %02d:%02d:00" % (year, month, day, hour, (i * 13) % 60),
+                lat=(30.0 + i * 0.37, 10, 0.0),
+                lon=(120.0 + i * 0.41, 20, 0.0),
+            )
+            variants.append(jpeg_with_exif(exif))
+
+    fills = variants + [video, doc, pdf, ole, variants[3], video]
     image = bytearray(total_size)
     # fill with low-entropy junk so magic bytes do not appear by accident
     chunk = bytes(rng.getrandbits(8) & 0x1F for _ in range(4096))
@@ -451,5 +480,5 @@ def build_demo_image(total_size: int = 24 * MIB, seed: int = 7) -> bytes:
         blob = fills[len(positions) % len(fills)]
         image[cursor: cursor + len(blob)] = blob
         positions.append((cursor, len(blob)))
-        cursor += len(blob) + rng.randrange(8 * 1024, 512 * 1024)
+        cursor += len(blob) + rng.randrange(8 * 1024, 384 * 1024)
     return bytes(image)
