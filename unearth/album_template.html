@@ -82,6 +82,7 @@ kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;paddin
       <button data-k="doc">文档</button>
     </span>
     <select id="ym"><option value="">按年月</option></select>
+    <select id="cls"><option value="">按可信度</option></select>
     <select id="minmp">
       <option value="0">任意像素</option>
       <option value="1">≥1 MP</option>
@@ -146,7 +147,7 @@ kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;paddin
   let fav = new Set(JSON.parse(localStorage.getItem(favKey) || '[]'));
 
   const $ = id => document.getElementById(id);
-  const state = {q:'', kind:'all', ym:'', minmp:0, cam:'', gps:false, full:false,
+  const state = {q:'', kind:'all', ym:'', minmp:0, cam:'', cls:'', gps:false, full:false,
                  hideDup:true, onlyFav:false, sort:'time', tile:170};
   const visible = [];
 
@@ -174,6 +175,7 @@ kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;paddin
     if(state.hideDup && it.dup) return false;
     if(state.onlyFav && !fav.has(it.id)) return false;
     if(state.cam && (it.mk||'')!==state.cam) return false;
+    if(state.cls && (it.cls||'')!==state.cls) return false;
     if(state.ym){
       const d=it.d||'unknown';
       if(state.ym==='unknown'){ if(d!=='unknown') return false; }
@@ -278,6 +280,7 @@ kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;paddin
       ['相机', [it.mk,it.md].filter(Boolean).join(' ') || '-'],
       ['GPS', it.lat!=null ? it.lat.toFixed(5)+', '+it.lon.toFixed(5) : '-'],
       ['推荐度', (it.sc||0)+' / 100'],
+      ['分类', (CLS_LABELS[it.cls]||it.cls||'-')],
       ['原文件夹', it.o || '-'],
       ['磁盘偏移', it.off!=null ? '0x'+it.off.toString(16) : '-'],
       ['来源', it.src || '-']
@@ -314,6 +317,7 @@ kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;paddin
   $('ym').addEventListener('change', e=>{state.ym=e.target.value; shown=LIMIT; render();});
   $('minmp').addEventListener('change', e=>{state.minmp=Number(e.target.value); shown=LIMIT; render();});
   $('cam').addEventListener('change', e=>{state.cam=e.target.value; shown=LIMIT; render();});
+  $('cls').addEventListener('change', e=>{state.cls=e.target.value; shown=LIMIT; render();});
   $('sort').addEventListener('change', e=>{state.sort=e.target.value; render();});
   $('t-gps').addEventListener('click', e=>{state.gps=!state.gps; e.target.classList.toggle('on'); shown=LIMIT; render();});
   $('t-full').addEventListener('click', e=>{state.full=!state.full; e.target.classList.toggle('on'); shown=LIMIT; render();});
@@ -361,6 +365,26 @@ kbd{background:var(--card);border:1px solid var(--line);border-radius:4px;paddin
   const cam=$('cam');
   [...cams].sort().forEach(c=>{
     const o=document.createElement('option'); o.value=c; o.textContent=c; cam.appendChild(o);
+  });
+
+  // 可信度分类（来自 photo-digger 的启发式规则）
+  const CLS_LABELS = {
+    camera_photo:'相机拍摄', likely_camera_photo:'疑似相机', maybe_photo:'部分指纹',
+    no_exif_unknown:'无EXIF待定', internet_screendim:'屏幕分辨率图',
+    internet_wallpaper:'壁纸比例图', internet_small:'小图',
+    internet_smallsize:'小文件图', not_photo:'非照片'
+  };
+  const CLS_CANDIDATES = ['camera_photo','likely_camera_photo','maybe_photo','no_exif_unknown'];
+  const byClass = DATA.by_class || {};
+  const clsSel = $('cls');
+  Object.keys(byClass).sort((a,b)=>{
+    const ia=CLS_CANDIDATES.indexOf(a), ib=CLS_CANDIDATES.indexOf(b);
+    return (ia<0?99:ia)-(ib<0?99:ib);
+  }).forEach(c=>{
+    const o=document.createElement('option');
+    o.value=c;
+    o.textContent=(CLS_LABELS[c]||c)+' ('+byClass[c]+')';
+    clsSel.appendChild(o);
   });
 
   const st=DATA.stats||{};

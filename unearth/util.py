@@ -225,6 +225,36 @@ def rel_posix(path: str, start: str) -> str:
     return os.path.relpath(path, start).replace("\\", "/")
 
 
+def locate_file(out_dir: str, row) -> str:
+    """Resolve a catalogue row's ``path`` to a real file on disk.
+
+    Rows written by ``scan`` store a path relative to the *output* directory
+    (the bytes were copied there).  Rows written by ``ingest`` point at files
+    that never moved, relative to the *source* directory.  Try the ingest
+    interpretation first - it is the one that can be verified - and fall back.
+    """
+    try:
+        rel = row["path"] or ""
+    except (KeyError, IndexError):
+        return ""
+    if not rel:
+        return ""
+    if os.path.isabs(rel):
+        return rel if os.path.exists(rel) else ""
+    candidates = []
+    try:
+        src = row["src"] or ""
+    except (KeyError, IndexError):
+        src = ""
+    if src and os.path.isdir(src):
+        candidates.append(os.path.join(src, rel))
+    candidates.append(os.path.join(out_dir, rel))
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    return candidates[-1] if candidates else ""
+
+
 # --------------------------------------------------------------------------- #
 # progress
 # --------------------------------------------------------------------------- #

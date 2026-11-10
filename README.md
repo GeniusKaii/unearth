@@ -14,8 +14,29 @@
 ## 它和"数据恢复软件"有什么不一样
 
 恢复软件给你一堆 `IMG_0001.JPG`，一万个，你不知道从哪看起。
-unearth 的第二半是**筛选**：按天分组的相册、相机型号、GPS、像素、推荐度、重复项隐藏、收藏导出。
+unearth 的第二半是**筛选**：先按元数据指纹判"这张是不是人拍的"，再按天分组的相册、相机型号、GPS、像素、推荐度、重复项隐藏、收藏导出。
 第一半才是恢复：分区签名雕刻 + NTFS 删除记录（保留原文件名和原始目录，比如 `DCIM/100CANON/IMG_1234.JPG`）。
+
+两个入口都能进筛选：
+
+| 你的起点 | 用哪个命令 |
+|---|---|
+| 一块旧盘 / 镜像 | `scan` + `ntfs`，字节从盘上挖出来 |
+| 恢复软件已经吐出来的目录 | `ingest`，文件原地不动，只摄取元数据 |
+
+## 照片可信度分级
+
+不是一个模糊的"评分"，是五档可解释的分类（规则来自 photo-digger 在 500G 恢复盘上的实战）：
+
+| 分类 | 判据 | 怎么处理 |
+|---|---|---|
+| `camera_photo` 相机拍摄 | 有相机型号 + 拍摄时间/曝光参数 | 几乎肯定是自己拍的 |
+| `likely_camera_photo` 疑似相机 | 只有型号，或缺时间 | 很可能 |
+| `maybe_photo` 部分指纹 | 只剩时间或参数（微信转过的） | 值得快速过一遍 |
+| `no_exif_unknown` 无EXIF待定 | 什么指纹都没有，但尺寸不像素材图 | 人工扫 |
+| `internet_*` 网络图 | 正好是屏幕分辨率 / 超宽壁纸比例 / 小于 400px / 小于 60KB | 可以直接扔 |
+
+视频单独处理：恢复出来的视频本身就是生活痕迹，不会因为没有 EXIF 被当成垃圾。
 
 ## 三条铁律
 
@@ -109,6 +130,30 @@ python -m unearth export D:\dig\e -d "D:\留档\2013" --picks "$env:USERPROFILE\
 python -m unearth export D:\dig\e -d D:\留档 --all
 ```
 
+## 另一条路：恢复软件已经跑过了
+
+如果恢复软件已经把文件吐成一个目录（`00001.jpg`、`00002.jpg`…），不用再扫盘，直接摄取：
+
+```powershell
+python -m unearth ingest "J:\500G-WD\照片类" -o D:\dig\j
+python -m unearth triage D:\dig\j
+start D:\dig\j\album\index.html
+```
+
+文件不会被复制或移动，`catalog.db` 只记它们的位置和元数据；导出时才复制。
+
+## 顺带：浏览安卓的 ext4 镜像
+
+不用挂载、不用装工具，直接读手机/模拟器的 `data.img`：
+
+```powershell
+python -m unearth ext4 data.img tree /data/media/0 --depth 4
+python -m unearth ext4 data.img ls /data/data
+python -m unearth ext4 data.img get /data/data/com.tencent.mm/MicroMsg/EnMicroMsg.db .\EnMicroMsg.db
+```
+
+配合 `scan` 先在镜像里搜 `SQLite format 3`，确认"有没有"，再用 `get` 精确导出。
+
 ## 命令
 
 | 命令 | 干什么 |
@@ -116,10 +161,12 @@ python -m unearth export D:\dig\e -d D:\留档 --all
 | `unearth drives` | 列出卷/物理盘，检查能不能读 |
 | `unearth scan <目标> -o <输出>` | 签名雕刻：照片/视频/文档成批挖出来 |
 | `unearth ntfs <目标> -o <输出>` | 按 NTFS 删除记录恢复（原名、原目录、时间） |
-| `unearth triage <输出>` | 打分、去重、生成相册 + 报告 |
+| `unearth ingest <目录> -o <输出>` | 摄取已有目录（恢复软件的产物），文件留在原地 |
+| `unearth triage <输出>` | 分类、打分、去重、生成相册 + 报告 |
 | `unearth album <输出>` | 只重建相册 |
 | `unearth report <输出>` | 打印 markdown 报告 |
 | `unearth export <输出> -d <目标目录>` | 导出（可带 `--picks`） |
+| `unearth ext4 <镜像> ls/tree/get` | 浏览/导出 ext4 镜像（安卓 `/data` 等） |
 | `unearth selftest` | 假镜像全流程自检 |
 
 目标写法：`vol:E:`（分区）、`disk:2`（整块盘）、`img:D:\backup\old.img`（镜像文件）、`\\.\PhysicalDrive2`。

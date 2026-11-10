@@ -42,6 +42,17 @@ def build_report(out_dir: str, cat) -> str:
         lines.append(_table([(k, n) for k, n in kinds.items()], ("类型", "数量")))
     lines.append("")
 
+    classes = conn.execute(
+        "SELECT cls, COUNT(*) n FROM file WHERE cls<>'' GROUP BY cls "
+        "ORDER BY n DESC").fetchall()
+    if classes:
+        from .triage import CLASS_LABELS_ZH
+
+        lines.append("## 按可信度（越高越像自己拍的照片）")
+        lines.append(_table([(r["cls"], CLASS_LABELS_ZH.get(r["cls"], ""), r["n"])
+                             for r in classes], ("分类", "说明", "数量")))
+        lines.append("")
+
     lines.append("## 按格式")
     fmts = list(stats["by_fmt"].items())[:20]
     if fmts:
@@ -79,7 +90,7 @@ def build_report(out_dir: str, cat) -> str:
     lines.append("## 怎么用")
     lines.append("")
     lines.append("1. 打开 `album/index.html`（双击即可，纯静态，不联网）。")
-    lines.append("2. 用筛选条按年月 / 类型 / 像素 / 相机 / GPS 缩小范围，`★` 收藏想留的。")
+    lines.append("2. 用筛选条按可信度 / 年月 / 类型 / 像素 / 相机 / GPS 缩小范围，`★` 收藏想留的。")
     lines.append("3. 点 `导出当前筛选清单` 得到 `picked.json`，然后：")
     lines.append("")
     lines.append("```")

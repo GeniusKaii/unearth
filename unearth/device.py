@@ -286,7 +286,11 @@ class WindowsRawSource(Source):
         end = min(offset + length, self.size)
         sec = self.sector_size
         aligned_start = offset - (offset % sec)
-        aligned_end = min(end + (-end % sec), self.size - (self.size % sec) or self.size)
+        # Align the end up, but never past the device end.  When the device
+        # size itself is not a multiple of the sector size (odd image files
+        # padded to bytes), the last partial sector is still readable: the
+        # volume manager serves it and stops at EOF.
+        aligned_end = min(end + (-end % sec), self.size)
         if aligned_end <= aligned_start:
             return b""
         if aligned_end - aligned_start > 8 * 1024 * 1024:

@@ -23,8 +23,10 @@ EPILOG = """\
   unearth drives                                  看有哪些盘、哪些能读
   unearth scan vol:E: -o D:\\dig\\e                 整个分区雕刻（管理员终端）
   unearth ntfs vol:E: -o D:\\dig\\e                 额外按 NTFS 删除记录恢复原名
+  unearth ingest J:\\500G\\照片 -o D:\\dig\\j        摄取恢复软件吐出的目录，重新筛选
   unearth triage D:\\dig\\e                        打分/去重/生成相册
   unearth export D:\\dig\\e -d D:\\留档 --all        导出全部
+  unearth ext4 data.img tree /data/media/0        浏览安卓 ext4 镜像
   unearth selftest                               先用假镜像自检，不碰真盘
 
 铁律: 只读打开源设备；输出永远写到另一块盘。
@@ -292,6 +294,63 @@ def cmd_ntfs(args) -> int:
         cat.close()
 
 
+def cmd_ingest(args) -> int:
+    from .ingest import ingest_dir
+
+    root = os.path.abspath(args.dir)
+    if not os.path.isdir(root):
+        return _fail("不是一个目录: %s" % root)
+    util.ensure_dir(args.out)
+    cat = _open_catalog(args.out)
+    try:
+        source_id = cat.add_source(root, "directory", os.path.basename(root))
+        scan_id = cat.begin_scan(source_id, root, "ingest", 0, 0, 0)
+        print("摄取目录: %s（只读，文件留在原地）" % root)
+        progress = Progress(0, "ingest", enabled=sys.stderr.isatty())
+        t0 = time.time()
+        stats = ingest_dir(root, cat, scan_id, progress=progress, log=print)
+        progress.close()
+        cat.finish_scan(scan_id, "done")
+        print("文件 %d 个（跳过非目标扩展名 %d、解析失败 %d），共 %s，用时 %s"
+              % (stats["ingested"], stats["skipped_ext"], stats["skipped_parse"],
+                 human_bytes(stats["bytes"]), util.human_duration(time.time() - t0)))
+        print("")
+        print("下一步: unearth triage %s" % args.out)
+        return 0
+    finally:
+        cat.close()
+
+
+def cmd_ext4(args) -> int:
+    from .fs.ext4 import Ext4, Ext4Error
+
+    if not os.path.isfile(args.image):
+        return _fail("没有这个镜像文件: %s" % args.image)
+    try:
+        fs = Ext4(args.image)
+    except Ext4Error as exc:
+        return _fail(str(exc))
+    try:
+        if args.cmd == "get" and not args.dest:
+            return _fail("get 需要输出文件参数")
+        ino = fs.lookup(args.path)
+        if ino is None:
+            return _fail("路径不存在: %s" % args.path)
+        if args.cmd == "ls":
+            for name, i, t in fs.listdir(ino):
+                print("%-6s %8d  %s" % ("dir" if t == 2 else "file", i, name))
+        elif args.cmd == "tree":
+            for p, i, t in fs.walk(args.path, maxdepth=args.depth):
+                print("%-6s %8d  %s" % ("dir" if t == 2 else "file", i, p))
+        elif args.cmd == "get":
+            written, complete = fs.export_file(ino, args.dest)
+            print("%s  %s%s" % (args.dest, human_bytes(written),
+                                "" if complete else "  （不完整：镜像有缺口）"))
+        return 0
+    finally:
+        fs.close()
+
+
 # --------------------------------------------------------------------------- #
 # triage / album / report / export
 # --------------------------------------------------------------------------- #
@@ -308,6 +367,12 @@ def cmd_triage(args) -> int:
         stats = summarize(args.out, cat)
         print("打分 %d 个，重复 %d 个，用时 %s"
               % (res["scored"], res["dupes"], util.human_duration(time.time() - t0)))
+        by_class = res.get("by_class") or {}
+        if by_class:
+            print("分类分布（越高越像真照片）:")
+            for cls in sorted(by_class, key=lambda c: -by_class[c]):
+                from .triage import CLASS_LABELS_ZH
+                print("  %-22s %-10s %d" % (cls, CLASS_LABELS_ZH.get(cls, ""), by_class[cls]))
         print("文件 %d（去重后 %d），共 %s"
               % (stats["files"], stats["unique"], human_bytes(stats["bytes"])))
         for kind, n in stats["by_kind"].items():
@@ -423,6 +488,20 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--limit", type=int, default=0, help="最多恢复多少个")
     sp.add_argument("--force", action="store_true")
     sp.set_defaults(func=cmd_ntfs)
+
+    sp = sub.add_parser("ingest", help="摄取一个已有目录（恢复软件吐出的文件），重新走筛选流程")
+    sp.add_argument("dir", help="要摄取的目录（只读，不复制不移动）")
+    sp.add_argument("-o", "--out", required=True,
+                    help="工作目录（catalog.db / album 会建在这里）")
+    sp.set_defaults(func=cmd_ingest)
+
+    sp = sub.add_parser("ext4", help="浏览/导出 ext4 镜像（安卓 /data 等）")
+    sp.add_argument("image", help="ext4 镜像文件")
+    sp.add_argument("cmd", choices=["ls", "tree", "get"], help="ls 路径 / tree 路径 / get 路径 输出文件")
+    sp.add_argument("path", help="镜像内的绝对路径，如 /data/media/0")
+    sp.add_argument("dest", nargs="?", help="get 的输出文件")
+    sp.add_argument("--depth", type=int, default=4, help="tree 的最大深度")
+    sp.set_defaults(func=cmd_ext4)
 
     sp = sub.add_parser("triage", help="打分、去重、生成相册和报告")
     sp.add_argument("out", help="scan 的输出目录")

@@ -343,15 +343,30 @@ class Ntfs:
                 ranges.append(span)
         return ranges
 
-    def live_extents(self, max_records: int = 0) -> list:
-        """Byte ranges occupied by *in use* files - used by ``--exclude-live``."""
-        out = []
-        for rec in self.iter_records(limit=max_records):
+    def live_extents(self, max_records: int = 0, progress=None):
+        """Byte ranges occupied by *in use* files - used by ``--exclude-live``.
+
+        Uses a bounded interval list: one (start, end) pair per contiguous
+        run, merged on the fly into at most one entry per adjacent cluster.
+        Memory stays proportional to the number of *fragments*, not to the
+        number of files or total bytes, which matters on a 1 TB disk with
+        millions of MFT records.
+        """
+        frags = []
+        for rec in self.iter_records(limit=max_records, progress=progress):
             if not rec.in_use or rec.is_dir:
                 continue
             for start, length in self.run_bytes(rec):
-                out.append((self.base + start, self.base + start + length))
-        return out
+                frags.append((self.base + start, self.base + start + length))
+        frags.sort()
+        out = []
+        for start, end in frags:
+            if out and start <= out[-1][1]:
+                if end > out[-1][1]:
+                    out[-1][1] = end
+            else:
+                out.append([start, end])
+        return [(start, end) for start, end in out]
 
 
 def extract(src, ntfs: Ntfs, rec: Record, dest_dir: str, taken=None):

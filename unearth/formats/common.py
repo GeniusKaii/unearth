@@ -55,6 +55,10 @@ class CarveResult:
                     "model", "captured", "day"):
             if m.get(key) not in (None, ""):
                 out[key] = m[key]
+        # exposure params (ISO / aperture / shutter / focal) are the strongest
+        # signal that a human *shot* the file rather than downloaded it
+        if any(m.get(k) is not None for k in ("iso", "fnumber", "exposure", "focal_mm")):
+            out["exif_params"] = 1
         return out
 
 

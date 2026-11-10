@@ -96,8 +96,8 @@ def make_thumbnail(row, out_dir: str, thumbs_dir: str) -> str:
     dest = os.path.join(thumbs_dir, "%d.jpg" % row["id"])
     if os.path.exists(dest) and os.path.getsize(dest) > 0:
         return os.path.relpath(dest, os.path.dirname(thumbs_dir)).replace("\\", "/")
-    src = os.path.join(out_dir, row["path"] or "")
-    if not row["path"] or not os.path.exists(src):
+    src = util.locate_file(out_dir, row)
+    if not src or not os.path.exists(src):
         return ""
     ok = False
     ext = (row["ext"] or "").lower()
@@ -119,8 +119,8 @@ def make_thumbnail(row, out_dir: str, thumbs_dir: str) -> str:
 # album
 # --------------------------------------------------------------------------- #
 def _item(row, album_dir: str, out_dir: str, thumb: str, dup_flag: int) -> dict:
-    src = os.path.join(out_dir, row["path"] or "")
-    rel = os.path.relpath(src, album_dir).replace("\\", "/") if row["path"] else ""
+    src = util.locate_file(out_dir, row)
+    rel = os.path.relpath(src, album_dir).replace("\\", "/") if src else ""
     item = {
         "id": row["id"],
         "k": row["kind"] or "other",
@@ -154,6 +154,9 @@ def _item(row, album_dir: str, out_dir: str, thumb: str, dup_flag: int) -> dict:
         item["th"] = thumb
     if row["note"]:
         item["note"] = row["note"]
+    cls = row["cls"] if "cls" in row.keys() else None
+    if cls:
+        item["cls"] = cls
     folder = _folder_hint(row, out_dir)
     if folder:
         item["o"] = folder
@@ -193,10 +196,15 @@ def build_album(out_dir: str, cat, title: str = "拾遗 unearth",
     items.sort(key=lambda it: (it.get("d") or "9999", it.get("id", 0)), reverse=True)
 
     stats = cat.stats()
+    by_class = {}
+    for row in cat.conn.execute("SELECT cls, COUNT(*) n FROM file WHERE cls<>'' "
+                                "GROUP BY cls ORDER BY n DESC"):
+        by_class[row["cls"]] = row["n"]
     payload = {
         "generated": util.now_iso(),
         "source": _source_label(cat),
         "stats": stats,
+        "by_class": by_class,
         "items": items[:EMBED_LIMIT],
     }
     blob = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))

@@ -496,3 +496,98 @@ def build_demo_image(total_size: int = 24 * MIB, seed: int = 7,
         positions.append((cursor, len(blob)))
         cursor += len(blob) + rng.randrange(8 * 1024, 384 * 1024)
     return bytes(image)
+
+
+# --------------------------------------------------------------------------- #
+# ext4 (a hand-built image, small enough to reason about)
+# --------------------------------------------------------------------------- #
+def make_ext4_image(payload=b"unearth ext4 fixture\n", name="hello.txt") -> bytes:
+    """A minimal ext4 volume: superblock, one group, extent-mapped file.
+
+    Layout (block size 1024):
+        block 0        boot area
+        block 1        superblock
+        block 2        group descriptor table
+        block 3        block bitmap
+        block 4        inode bitmap
+        block 5        inode table (32 inodes, 128 bytes each)
+        block 6+       data blocks
+    Root inode is 2, the fixture file lives at inode 12 inside /data.
+    """
+    bs = 1024
+    inode_size = 128
+    inodes_per_group = 32
+    blocks_per_group = 2048
+    # blocks: 0 boot, 1 sb, 2 gdt, 3 bbitmap, 4 ibitmap, 5-8 itable,
+    # 9 data (/data dir), 10 data (file), 11 data (root dir)
+    total_blocks = 16
+    image = bytearray(total_blocks * bs)
+
+    # --- superblock (offset 1024, 1024 bytes) ---
+    sb = bytearray(bs)
+    struct.pack_into("<I", sb, 0x00, inodes_per_group)     # s_inodes_count
+    struct.pack_into("<I", sb, 0x04, total_blocks)         # s_blocks_count_lo
+    struct.pack_into("<I", sb, 0x14, 1)                    # s_first_data_block (1 for 1 KiB blocks)
+    struct.pack_into("<I", sb, 0x18, 0)                    # s_log_block_size (1024)
+    struct.pack_into("<I", sb, 0x20, blocks_per_group)     # s_blocks_per_group
+    struct.pack_into("<I", sb, 0x28, inodes_per_group)     # s_inodes_per_group
+    struct.pack_into("<H", sb, 0x58, inode_size)           # s_inode_size
+    # s_feature_incompat: extents (0x40) + 64bit (0x80)
+    struct.pack_into("<I", sb, 0x60, 0x40 | 0x80)
+    struct.pack_into("<H", sb, 0xFE, 64)                   # s_desc_size
+    sb[56:58] = b"\x53\xef"                                # magic
+    image[1024:1024 + bs] = sb
+
+    # --- group descriptor (block 2), 64 bytes ---
+    gdt = 2 * bs
+    struct.pack_into("<I", image, gdt + 0x08, 5)           # inode table block
+    struct.pack_into("<I", image, gdt + 0x00, 3)           # block bitmap block
+    struct.pack_into("<I", image, gdt + 0x04, 4)           # inode bitmap block
+    struct.pack_into("<H", image, gdt + 0x10, 1)           # used dirs
+
+    itable = 5 * bs
+
+    def write_inode(ino, mode, size, extents, links=1):
+        off = itable + (ino - 1) * inode_size
+        struct.pack_into("<H", image, off + 0x00, mode)
+        struct.pack_into("<I", image, off + 0x04, size)
+        struct.pack_into("<I", image, off + 0x1A, links)
+        struct.pack_into("<I", image, off + 0x20, 0)       # flags
+        # extent header at i_block (offset 0x28, 60 bytes)
+        ib = off + 0x28
+        image[ib:ib + 60] = b"\x00" * 60
+        if extents:
+            struct.pack_into("<HHHHI", image, ib, 0xF30A, len(extents), 4, 0, 0)
+            pos = ib + 12
+            for logical, phys, length in extents:
+                struct.pack_into("<IHHI", image, pos, logical, length, 0, phys)
+                pos += 12
+
+    def dir_block(entries):
+        """Build one directory block: [(name, inode, filetype)]."""
+        blk = bytearray(bs)
+        pos = 0
+        for i, (nm, ino, ftype) in enumerate(entries):
+            raw = nm.encode()
+            rec = 8 + len(raw)
+            rec = (rec + 3) & ~3
+            if i == len(entries) - 1:
+                rec = bs - pos          # last entry swallows the rest
+            struct.pack_into("<IHBB", blk, pos, ino, rec, len(raw), ftype)
+            blk[pos + 8:pos + 8 + len(raw)] = raw
+            pos += rec
+            if pos >= bs:
+                break
+        return bytes(blk)
+
+    # root (inode 2) -> block 11
+    write_inode(2, 0o40755, bs, [(0, 11, 1)], links=2)
+    image[11 * bs:12 * bs] = dir_block([( ".", 2, 2), ("..", 2, 2), ("data", 11, 2)])
+    # /data (inode 11) -> block 9
+    write_inode(11, 0o40755, bs, [(0, 9, 1)], links=2)
+    image[9 * bs:10 * bs] = dir_block([(".", 11, 2), ("..", 2, 2),
+                                       (name, 12, 1)])
+    # /data/<name> (inode 12) -> block 10
+    write_inode(12, 0o100644, len(payload), [(0, 10, 1)])
+    image[10 * bs:10 * bs + len(payload)] = payload
+    return bytes(image)

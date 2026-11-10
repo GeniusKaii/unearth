@@ -74,6 +74,8 @@ CREATE TABLE IF NOT EXISTS file (
     orientation INTEGER,
     score     INTEGER DEFAULT 0,
     dup_group INTEGER DEFAULT 0,
+    cls       TEXT,
+    exif_params INTEGER DEFAULT 0,
     thumb     TEXT,
     note      TEXT,
     created   TEXT
@@ -95,8 +97,15 @@ CREATE TABLE IF NOT EXISTS tag (
 FILE_COLUMNS = (
     "scan_id", "src", "kind", "fmt", "ext", "off", "size", "complete", "name",
     "path", "sha256", "width", "height", "duration", "captured", "day", "make",
-    "model", "gps_lat", "gps_lon", "orientation", "score", "dup_group", "thumb",
-    "note", "created",
+    "model", "gps_lat", "gps_lon", "orientation", "score", "dup_group", "cls",
+    "exif_params", "thumb", "note", "created",
+)
+
+# Columns added after v0.1 shipped; CREATE TABLE IF NOT EXISTS cannot add
+# them to an existing catalogue, so we ALTER on open.
+_MIGRATIONS = (
+    ("file", "cls", "TEXT"),
+    ("file", "exif_params", "INTEGER DEFAULT 0"),
 )
 
 
@@ -114,12 +123,33 @@ class Catalog:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA temp_store=MEMORY")
         if not readonly:
+            legacy = self._existing_tables()
             self.conn.executescript(SCHEMA)
+            self._migrate(legacy)
             self.conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
             )
             self.conn.commit()
+
+    def _existing_tables(self) -> bool:
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='file'"
+        ).fetchone()
+        return bool(row and row[0])
+
+    def _migrate(self, legacy: bool) -> None:
+        """Add columns that a pre-existing catalogue from an older version lacks."""
+        if not legacy:
+            return
+        have = {r[1] for r in self.conn.execute("PRAGMA table_info(file)")}
+        for table, column, decl in _MIGRATIONS:
+            if column in have:
+                continue
+            self.conn.execute("ALTER TABLE %s ADD COLUMN %s %s"
+                              % (table, column, decl))
+            self.conn.execute("UPDATE meta SET value=? WHERE key='schema_version'",
+                              (str(SCHEMA_VERSION),))
 
     # -- lifecycle -----------------------------------------------------------
     def close(self) -> None:

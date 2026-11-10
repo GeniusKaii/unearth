@@ -1,4 +1,4 @@
-﻿"""Triage: rank, de-duplicate and prepare the catalogue for browsing.
+"""Triage: rank, de-duplicate and prepare the catalogue for browsing.
 
 Carving answers "what bytes are on this disk".  Triage answers the question the
 user actually asks: *which of these are the photos of my life?*  The score is a
@@ -12,6 +12,8 @@ import os
 
 from .. import util
 from ..formats.registry import PROFILES
+from .classify import (CANDIDATE_CLASSES, CLASS_LABELS_ZH, CLASS_ORDER,
+                       classify_photo, class_rank, is_candidate)
 
 KIND_BY_EXT = {}
 for _ext in ("jpg jpeg jpe png gif bmp tif tiff heic heif webp avif dng cr2 nef "
@@ -102,12 +104,25 @@ def dup_primaries(conn) -> dict:
 
 
 def run_triage(out_dir: str, cat, progress=None) -> dict:
-    """Score everything, mark duplicates, and refresh the album."""
+    """Classify, score, mark duplicates, and refresh the album."""
     rows = list(cat.iter_files())
     updates = []
+    class_updates = []
+    counts: dict = {}
     for row in rows:
         updates.append((score_row(row), row["id"]))
+        cls = classify_photo(
+            kind=row["kind"] or "", width=row["width"], height=row["height"],
+            make=row["make"], model=row["model"], captured=row["captured"],
+            size=row["size"],
+            has_exposure_params=bool(
+                row["exif_params"] if "exif_params" in row.keys() else 0),
+        )
+        counts[cls] = counts.get(cls, 0) + 1
+        class_updates.append((cls, row["id"]))
     cat.conn.executemany("UPDATE file SET score=? WHERE id=?", updates)
+    cat.conn.executemany("UPDATE file SET cls=? WHERE id=?",
+                         [(c, i) for c, i in class_updates])
     cat.commit()
     dupes = assign_duplicates(cat.conn)
     cat.commit()
@@ -115,11 +130,16 @@ def run_triage(out_dir: str, cat, progress=None) -> dict:
     from ..album import build_album
 
     album_path = build_album(out_dir, cat, progress=progress)
-    return {"scored": len(rows), "dupes": dupes, "album": album_path}
+    return {"scored": len(rows), "dupes": dupes, "album": album_path,
+            "by_class": counts}
 
 
 def summarize(out_dir: str, cat) -> dict:
     stats = cat.stats()
+    stats["by_class"] = {}
+    for row in cat.conn.execute("SELECT cls, COUNT(*) n FROM file WHERE cls<>'' "
+                                "GROUP BY cls ORDER BY n DESC"):
+        stats["by_class"][row["cls"]] = row["n"]
     primaries = dup_primaries(cat.conn)
     conn = cat.conn
     unique = 0

@@ -47,8 +47,8 @@ def export_selection(out_dir: str, cat, dest_dir: str, ids=None,
         if only_complete and not row["complete"]:
             stats["skipped_partial"] += 1
             continue
-        src = os.path.join(out_dir, row["path"] or "")
-        if not row["path"] or not os.path.exists(src):
+        src = util.locate_file(out_dir, row)
+        if not src or not os.path.exists(src):
             stats["skipped_missing"] += 1
             continue
         if not flat:
